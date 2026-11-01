@@ -1,0 +1,10 @@
+# Installed by "npm install @faker-js/faker"
+node_modules/
+
+# artillery output written by a run here. Anchored, so the kept examples in deprecated/
+# are not matched.
+/results*.json
+/results*.html
+
+# macOS
+.DS_Store

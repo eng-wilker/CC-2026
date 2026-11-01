@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored.
+
+suffix = "4204"          # yours, not this one
+region = "francecentral"
+
+# false if the resource group already exists, for instance because you created it in the portal
+create_resource_group = true
+
+# F1 is free but shared and throttled - fine for checking the application runs, useless for
+# measuring. Switch to B1 before collecting any numbers for the report.
+app_service_sku = "F1"

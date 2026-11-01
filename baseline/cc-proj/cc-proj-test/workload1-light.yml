@@ -1,0 +1,269 @@
+# A lighter variant of workload1.yml: the same scenarios, weights and operations, but the
+# requests that scan whole containers - /auction/any/popular and /auction/any/recent - are made
+# far less often. In workload1.yml, mixed browsing fetches both on every step of its loop; here
+# it fetches them once, when the user arrives, and the user checking own auctions does not
+# fetch them at all. Use it to measure the server rather than the database - for instance, to
+# compare App Service with Azure Functions.
+config:
+  target: 'https://cc26appfrancecentral4204.azurewebsites.net/rest'
+  http:
+    timeout: 10
+  plugins:
+    metrics-by-endpoint:
+      useOnlyRequestNames: true  # new mode to aggregate metrics in artillery
+  processor: "./test-utils.js"
+  variables:
+    searchTerm: "chair"
+  phases:
+  - name: "Warm up"
+    arrivalRate: 1         
+    duration: 10
+  - name: "Test"
+    arrivalRate: 2         
+    duration: 120
+
+scenarios:
+  - name: 'User checks own auctions'
+    weight: 5
+    flow:
+      - function: "selectUserSkewed"
+      - post:                          # First: login as a user
+          url: "/user/auth"
+          name: "POST:/user/auth"
+          headers:
+            Content-Type: application/json
+          json:
+            user: "{{ user }}"
+            pwd: "{{ pwd }}"
+      - get:                          # Get user auctions - straight away, no home page here
+          url: "/user/{{ user }}/auctions?status=open"
+          name: "GET:/user/*/auctions"
+          headers:
+            Accept: application/json
+          capture: 
+            json: "$"
+            as: "auctionsLst"
+      - loop:                                   # Check bids
+        - get:                          # First: post image for the user
+            url: "/media/{{ $loopElement.imageId }}"
+            name: "GET:/media"
+            headers:
+              Accept: image/*
+        - get:
+            url: "/auction/{{ $loopElement.id }}/bid"
+            name: "GET:/auction/*/bid"
+            headers: 
+              Accept: application/json
+        - get:
+            url: "/auction/{{ $loopElement.id }}/question"
+            name: "GET:/auction/*/question"
+            headers: 
+              Accept: application/json
+            capture:
+              json: "$"
+              as: "questionsLst"
+        - function: "decideToReply"     # picks an unanswered question, sets questionId and reply
+        - post:                          # New reply
+            url: "/auction/{{ $loopElement.id }}/question/{{ questionId }}/reply"
+            name: "POST:/auction/*/question/*/reply"
+            headers:
+              Content-Type: application/json
+              Accept: application/json
+            json:
+              reply: "{{ reply }}"
+            ifTrue: "reply"
+        over: "auctionsLst"
+
+  - name: 'User browses search and closing auctions'
+    weight: 10
+    flow:
+      - function: "selectUserSkewed"
+      - post:                          # First: login as a user
+          url: "/user/auth"
+          name: "POST:/user/auth"
+          headers:
+            Content-Type: application/json
+          json:
+            user: "{{ user }}"
+            pwd: "{{ pwd }}"
+      - get:                          # Get info for initial page (assuming recent + popular)
+          url: "/auction/any/popular?st=0&len=20"
+          name: "GET:/auction/any/popular"
+          headers:
+            Accept: application/json
+      - get:                          # Get info for initial page (assuming recent + popular)
+          url: "/auction/any/recent?st=0&len=20"
+          name: "GET:/auction/any/recent"
+          headers:
+            Accept: application/json
+      - get:                          # Free-text search - a CONTAINS scan (L5)
+          url: "/auction/search?q={{ searchTerm }}&st=0&len=20"
+          name: "GET:/auction/search"
+          headers:
+            Accept: application/json
+      - get:                          # Auctions about to close. Replaces /user/*/following,
+          url: "/auction/any/about-to-close?st=0&len=20"    # which no longer exists.
+          name: "GET:/auction/any/about-to-close"
+          headers:
+            Accept: application/json
+          capture: 
+            json: "$"
+            as: "auctionsLst"
+      - loop:                                   # Check bids
+        - get:                          # First: post image for the user
+            url: "/media/{{ $loopElement.imageId }}"
+            name: "GET:/media"
+            headers:
+              Accept: image/*
+        - get:                          # The auction itself: its winnerBid is the current top bid
+            url: "/auction/{{ $loopElement.id }}"
+            name: "GET:/auction/*"
+            headers: 
+              Accept: application/json
+            capture: 
+              json: "$"
+              as: "auction"
+        - function: "decideToCoverBid"
+        - post:                          # New bid     
+            url: "/auction/{{ auctionId }}/bid"
+            name: "POST:/auction/*/bid"
+            headers:
+              Content-Type: application/json
+              Accept: application/json
+            json:
+              auctionId: "{{ auctionId }}"
+              user: "{{ user }}"
+              value: "{{ value }}"
+            ifTrue: "value"
+        over: "auctionsLst"
+
+  - name: 'Mixed browsing'
+    weight: 40
+    flow:
+      - function: "selectUserSkewed"
+      - post:                          # First: login as a user
+          url: "/user/auth"
+          name: "POST:/user/auth"
+          headers:
+            Content-Type: application/json
+          json:
+            user: "{{ user }}"
+            pwd: "{{ pwd }}"
+      - get:                          # Initial page (recent + popular) - once, not on every step
+          url: "/auction/any/popular?st=0&len=20"
+          name: "GET:/auction/any/popular"
+          headers:
+            Accept: application/json
+          capture: 
+            json: "$"
+            as: "popularLst"
+      - get:
+          url: "/auction/any/recent?st=0&len=20"
+          name: "GET:/auction/any/recent"
+          headers:
+            Accept: application/json
+          capture: 
+            json: "$"
+            as: "recentLst"
+      - loop:                         # picks auctions from the lists above, or from the last page browsed
+        - function: "decideNextAction"
+        - get:                          # Browse next page of popular
+            url: "/auction/any/popular?st=20&len=20"
+            name: "GET:/auction/any/popular"
+            headers:
+              Accept: application/json
+            capture: 
+              json: "$"
+              as: "auctionsLst"
+            ifTrue: "nextAction == 0"
+        - get:                          # Browse next page of recent
+            url: "/auction/any/recent?st=20&len=20"
+            name: "GET:/auction/any/recent"
+            headers:
+              Accept: application/json
+            capture: 
+              json: "$"
+              as: "auctionsLst"
+            ifTrue: "nextAction == 1"
+        - get:                          # Get user auctions
+            url: "/user/{{ user2 }}/auctions?status=open"
+            name: "GET:/user/*/auctions"
+            headers:
+              Accept: application/json
+            capture: 
+              json: "$"
+              as: "auctionsLst"
+            ifTrue: "nextAction == 2"
+        - post:                          # CREATE an auction; first post image
+            url: "/media"
+            name: "POST:/media"
+            headers:
+              Content-Type: image/jpeg
+              Accept: text/plain
+            beforeRequest: "uploadImageBody"
+            capture: 
+              regexp: "(.+)"
+              as: "imageId"              # capture the reply as image id to be used in uction creation
+            ifTrue: "nextAction == 3"
+        - post:                          # Create auction
+            url: "/auction"
+            name: "POST:/auction"
+            headers:
+              Content-Type: application/json
+              Accept: application/json
+            json:
+              description: "{{ description }}"
+              title: "{{ title }}"
+              owner: "{{ user }}"
+              imageId: "{{ imageId }}"
+              endTime: "{{ endTime }}"
+              minimumPrice: "{{ minimumPrice }}"
+            ifTrue: "nextAction == 3"
+        - get:                          # Call methods for displaying auction: image, auction, questions
+            url: "/media/{{ imageId }}"
+            name: "GET:/media"
+            headers:
+              Accept: image/*
+            ifTrue: "nextAction >= 4"
+        - get:                          # The auction itself: its winnerBid is the current top bid
+            url: "/auction/{{ auctionId }}"
+            name: "GET:/auction/*"
+            headers: 
+              Accept: application/json
+            capture: 
+              json: "$"
+              as: "auction"
+            ifTrue: "nextAction >= 4"
+        - get:
+            url: "/auction/{{ auctionId }}/question"   #get the questions
+            name: "GET:/auction/*/question"
+            headers: 
+              Accept: application/json
+            capture: 
+              json: "$"
+              as: "questionsLst"
+            ifTrue: "nextAction >= 4"
+        - function: "decideToCoverBid"
+        - post:                          # New bid     
+            url: "/auction/{{ auctionId }}/bid"
+            name: "POST:/auction/*/bid"
+            headers:
+              Content-Type: application/json
+              Accept: application/json
+            json:
+              auctionId: "{{ auctionId }}"
+              user: "{{ user }}"
+              value: "{{ value }}"
+            ifTrue: "value and nextAction == 5"
+        - post:                          # Post message
+            url: "/auction/{{ auctionId }}/question"
+            name: "POST:/auction/*/question"
+            headers:
+              Content-Type: application/json
+              Accept: application/json
+            json:
+              auctionId: "{{ auctionId }}"
+              user: "{{ user }}"
+              text: "{{ text }}"
+            ifTrue: "nextAction == 6"
+        whileTrue: "random80"
