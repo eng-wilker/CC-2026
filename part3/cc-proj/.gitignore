@@ -1,0 +1,43 @@
+# Build output
+target/
+*.class
+*.log
+
+# Package files
+*.jar
+*.war
+*.zip
+
+# Terraform.
+#
+# terraform.tfstate contains the database and storage keys in clear text once you have run
+# apply. Never commit it. terraform.tfvars is your own suffix and region.
+#
+# .terraform.lock.hcl is ignored too: "terraform init" generates it, and you run your own.
+# The "~> 4.0" constraint in main.tf keeps the provider version in line.
+.terraform/
+.terraform.lock.hcl
+.terraform.tfstate.lock.info
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+
+# Anything holding Azure keys
+azurekeys*.props
+azureprops*.sh
+*.env
+
+# IDE
+.idea/
+*.iml
+.settings/
+.project
+.classpath
+.vscode/
+
+# macOS
+.DS_Store
+Icon?
+
+# Written by "terraform apply" with your app names - see the end of main.tf.
+.mvn/

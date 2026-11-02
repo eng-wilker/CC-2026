@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored.
+
+suffix = "4204"          # yours, not this one - and the same as in cc-proj
+region = "francecentral" # the same as in cc-proj
+
+# false if you have run "terraform apply" in cc-proj, which created the resource group and the
+# database; true to create them here, for the functions without the web app
+create_shared_resources = false
+
+# only used when create_shared_resources is true: false if the resource group already exists,
+# for instance because you created it in the portal
+create_resource_group = true

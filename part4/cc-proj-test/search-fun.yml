@@ -1,0 +1,17 @@
+config:
+  target: "https://example.invalid/rest"
+  http:
+    timeout: 60
+  processor: "./search-utils.js"
+  phases:
+    - name: "Part 4 search measurement"
+      duration: 60
+      arrivalRate: 1
+
+scenarios:
+  - name: "Search auction titles and descriptions"
+    flow:
+      - function: "selectSearchTerm"
+      - get:
+          url: "/auction/search?q={{ searchTerm }}&st=0&len=20"
+          name: "GET:/auction/search"
